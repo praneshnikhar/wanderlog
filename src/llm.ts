@@ -39,6 +39,7 @@ export async function generateAnswer(question: string, hits: SearchHit[]): Promi
   const prompt = [
     `Today's date is ${today}. You are a naturalist's field journal assistant.`,
     "Answer the question using ONLY the journal entries below.",
+    "Write a short, natural answer in your own words (2-4 sentences), citing the entry number like [1] and its date in parentheses.",
     "The entries are listed newest first: [1] has the latest date, and every next number is older.",
     "If the question asks for the most recent event or 'the last time', answer with entry [1] among the relevant matches, and state its place and date.",
     "If the question asks how many times something happened, count every relevant entry and list their dates.",
