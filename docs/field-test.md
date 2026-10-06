@@ -1,61 +1,47 @@
-# Field test runbook — Friday, Oct 9, 2026
+# Field test — Friday, Oct 9, 2026 (simple version)
 
-Goal: use WanderLog for real on a walk, capture evidence, and report back in the
-submission post (the challenge gives bonus points for taking it outside).
+Goal: take WanderLog on a real walk, log what you see, ask it a question
+afterward, and write 3-4 honest sentences about it in the post
+(bonus points in the challenge).
 
-## Before leaving (10 min)
+## What you do
 
-1. Make sure the LLM is up so the end-of-walk questions work:
-   ```bash
-   ollama serve &          # if not already running
-   ollama list | grep gemma3
-   ```
-2. Warm the journal and confirm search works:
+1. Go for a normal walk (Central Park, Jaipur works great).
+2. **While walking:** just note 3-5 things you see — in your phone's Notes
+   app, on paper, or in your head. Examples:
+   - white-breasted kingfisher at the lake jetty, dove twice, got a fish
+   - parakeet flock, ~40 birds, all heading west
+   - rain lilies blooming, fresh after last night's rain
+   - walk total: ~3.2 km, ~50 min, fog on the lake
+3. **When you're home** (10 minutes later), at your laptop:
    ```bash
    cd ~/coding2/hacktoberWeek2
-   npm run demo             # should print the seeded journal + an answer
+   npm run log -- "white-breasted kingfisher" bird "Central Park lake jetty" "dove twice, got a fish"
+   npm run log -- "rose-ringed parakeet" bird "Central Park" "flock of 40 heading west"
+   npm run log-walk -- "Central Park loop" 3.2 "fog on the lake"
    ```
-3. Set up phone SSH (pick one):
-   - **Same LAN:** Settings → enable SSH on the Mac (System Settings → General →
-     Sharing → Remote Login), then from the phone:
-     `ssh pranesh@<mac-lan-ip>`
-   - **Anywhere:** Tailscale on both devices, `ssh pranesh@<tailscale-name>`
-   - **Fallback:** just take notes in the phone's Notes app and log everything
-     the moment you're back at the laptop.
-
-## On the walk
-
-Log each sighting as you see it (one line from the phone):
-
-```bash
-cd ~/coding2/hacktoberWeek2
-npm run log -- "white-breasted kingfisher" bird "Central Park lake jetty" "dove twice, got a fish"
-npm run log-walk -- "Central Park loop" 3.2 "fog on the lake"
-```
-
-Tips:
-- Species name is enough if you're not sure — write what you saw; you can fix it later.
-- One note that captures the *moment* beats three that capture nothing.
-- Capture evidence: a photo of the bird/plant if possible, a screenshot of the
-  terminal on the phone, and a photo of where you're standing.
-
-## When you get back (must do, 15 min)
-
-1. Run the journal's own questions against the fresh entries:
+   Or just tell your coding agent "log what I saw on my walk" and it does it.
+4. Ask the journal about itself:
    ```bash
    npm run demo -- --question "where did I see the kingfisher last time?"
-   npm run demo -- --question "how many sightings did I log this week, and where?"
    ```
-2. Screenshot / copy the output for the post.
-3. Commit the new journal? No — the journal is private (`~/.wanderlog/journal.db`
-   is not in the repo). Instead, copy the session output into the post's field
-   report section.
 
-## Evidence checklist
+## Evidence — only what's easy
 
-- [ ] 3–5 real sightings logged during the walk
-- [ ] 1 walk logged with distance/duration
-- [ ] screenshot: logging from the phone
-- [ ] screenshot: the "where did I see the kingfisher last time?" answer
-- [ ] 1–2 photos of the outing
-- [ ] field report paragraph for the post (what worked, what was annoying)
+- [ ] Copy the terminal output of the question above (txt, or a phone photo of
+      the screen — either is fine)
+- [ ] 1-2 photos of the walk (optional, for the post)
+
+## The field report (the actual deliverable)
+
+Write 3-4 sentences for the post: what you saw, that you logged it, what the
+journal answered, and one honest thing you'd improve. Example:
+
+> "Took WanderLog to Central Park on Friday: logged a white-breasted
+> kingfisher, a parakeet flock, and a 3.2 km loop. Asked it where I'd seen a
+> kingfisher before and it answered correctly from the seeded walk. The
+> one-line CLI takes longer to type than the walk takes to start — next step
+> is voice notes."
+
+Then I'll drop that paragraph into the post, you review, and we publish
+before Oct 11, 11:59 PM PDT.
