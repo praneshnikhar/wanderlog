@@ -1,0 +1,34 @@
+{
+  "name": "wanderlog",
+  "version": "1.0.0",
+  "description": "A local-first field journal MCP server. Log sightings and walks on-device, search them semantically with open-weight models, no internet required.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/server.ts",
+    "seed": "tsx src/seed.ts",
+    "demo": "tsx scripts/demo.ts",
+    "test": "tsx test/smoke.test.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
+    "@modelcontextprotocol/server": "^2.3.1",
+    "better-sqlite3": "^13.0.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.3.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "allowScripts": {
+    "onnxruntime-node@1.30.0": true
+  }
+}
