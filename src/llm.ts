@@ -24,8 +24,11 @@ export function llmModelName(): string {
 }
 
 export async function generateAnswer(question: string, hits: SearchHit[]): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10);
   const context = hits
-    .slice(0, 10)
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 8)
     .map((h, i) => {
       const where =
         h.kind === "sighting" ? `${h.location ?? "unspecified location"}\n  species: ${h.species ?? ""}` : `trail: ${h.trail ?? "unspecified trail"}`;
@@ -34,9 +37,13 @@ export async function generateAnswer(question: string, hits: SearchHit[]): Promi
     .join("\n\n");
 
   const prompt = [
-    "You are a naturalist's field journal assistant. Answer the question using ONLY the journal entries below.",
-    "Quote entry numbers like [3] and dates when you cite them. If the answer is not in the journal, say so plainly.",
-    "Journal entries:",
+    `Today's date is ${today}. You are a naturalist's field journal assistant.`,
+    "Answer the question using ONLY the journal entries below.",
+    "The entries are listed newest first: [1] has the latest date, and every next number is older.",
+    "If the question asks for the most recent event or 'the last time', answer with entry [1] among the relevant matches, and state its place and date.",
+    "If the question asks how many times something happened, count every relevant entry and list their dates.",
+    "If the answer is not in the journal, say so plainly. Never invent a sighting.",
+    "Journal entries (newest first):",
     context,
     "",
     `Question: ${question}`,
