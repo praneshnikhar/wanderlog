@@ -13,6 +13,8 @@
     "dev": "tsx src/server.ts",
     "seed": "tsx src/seed.ts",
     "demo": "tsx scripts/demo.ts",
+    "log": "tsx scripts/log.ts log",
+    "log-walk": "tsx scripts/log.ts log-walk",
     "test": "tsx test/smoke.test.ts"
   },
   "dependencies": {
