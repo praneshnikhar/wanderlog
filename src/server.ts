@@ -6,7 +6,22 @@ import { insertSighting, insertWalk, overview } from "./db.js";
 import { hybridSearch, ensureEmbeddedFor, sightingText, walkText } from "./search.js";
 import { registerResources } from "./resources.js";
 import { llmAvailable, generateAnswer, llmModelName } from "./llm.js";
+import { transcribeAudio, logVoiceNote } from "./voice.js";
+import { initTracing, trace } from "./tracing.js";
 import { CATEGORIES } from "./types.js";
+
+function traceTool(name: string, args: unknown): Parameters<typeof trace>[0] {
+  return {
+    name: `execute_tool ${name}`,
+    op: "gen_ai.execute_tool",
+    attributes: {
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.name": name,
+      "gen_ai.tool.call.arguments": JSON.stringify(args).slice(0, 500),
+    },
+    flush: true,
+  };
+}
 
 const SERVER_NAME = "wanderlog";
 const SERVER_VERSION = "1.0.0";
@@ -49,22 +64,26 @@ export function createServer(db: Db): McpServer {
     },
     async (args) => {
       try {
-        const sighting = insertSighting(db, {
-          species: args.species,
-          category: args.category,
-          location: args.location,
-          lat: args.lat,
-          lon: args.lon,
-          weather: args.weather,
-          notes: args.notes,
-          observedAt: args.observed_at,
-          walkId: args.walk_id,
+        return await trace(traceTool("log_sighting", args), async (t) => {
+          const sighting = insertSighting(db, {
+            species: args.species,
+            category: args.category,
+            location: args.location,
+            lat: args.lat,
+            lon: args.lon,
+            weather: args.weather,
+            notes: args.notes,
+            observedAt: args.observed_at,
+            walkId: args.walk_id,
+          });
+          await ensureEmbeddedFor(db, "sighting", sighting.id);
+          t.setAttribute("wanderlog.sighting_id", sighting.id);
+          t.setAttribute("wanderlog.category", sighting.category);
+          return text(
+            `Logged sighting #${sighting.id}:\n${sightingText(sighting)}\n` +
+            `The journal now has ${overview(db).sightingCount} sightings. Ask me "where did I see this before?" anytime — search stays on-device.`
+          );
         });
-        await ensureEmbeddedFor(db, "sighting", sighting.id);
-        return text(
-          `Logged sighting #${sighting.id}:\n${sightingText(sighting)}\n` +
-          `The journal now has ${overview(db).sightingCount} sightings. Ask me "where did I see this before?" anytime — search stays on-device.`
-        );
       } catch (err) {
         return errorText(`failed to log sighting: ${(err as Error).message}`);
       }
@@ -88,15 +107,18 @@ export function createServer(db: Db): McpServer {
     },
     async (args) => {
       try {
-        const walk = insertWalk(db, {
-          date: args.date,
-          trail: args.trail,
-          distanceKm: args.distance_km,
-          durationMin: args.duration_min,
-          notes: args.notes,
+        return await trace(traceTool("log_walk", args), async (t) => {
+          const walk = insertWalk(db, {
+            date: args.date,
+            trail: args.trail,
+            distanceKm: args.distance_km,
+            durationMin: args.duration_min,
+            notes: args.notes,
+          });
+          await ensureEmbeddedFor(db, "walk", walk.id);
+          t.setAttribute("wanderlog.walk_id", walk.id);
+          return text(`Logged walk #${walk.id}:\n${walkText(walk)}`);
         });
-        await ensureEmbeddedFor(db, "walk", walk.id);
-        return text(`Logged walk #${walk.id}:\n${walkText(walk)}`);
       } catch (err) {
         return errorText(`failed to log walk: ${(err as Error).message}`);
       }
@@ -121,21 +143,24 @@ export function createServer(db: Db): McpServer {
     },
     async (args) => {
       try {
-        const hits = await hybridSearch(db, args.query, {
-          since: args.since,
-          before: args.before,
-          category: args.category,
+        return await trace(traceTool("search_journal", args), async (t) => {
+          const hits = await hybridSearch(db, args.query, {
+            since: args.since,
+            before: args.before,
+            category: args.category,
+          });
+          const top = hits.slice(0, args.k ?? 5);
+          t.setAttribute("wanderlog.results", top.length);
+          if (top.length === 0) {
+            return text("No journal entries match. Log some sightings first — then get outside and back.");
+          }
+          const lines = top.map((h, i) => {
+            const where = h.location ? ` at ${h.location}` : h.trail ? ` on ${h.trail}` : "";
+            const what = h.species ?? "walk";
+            return `${String(i + 1).padStart(2, " ")}. [${h.date}] ${h.kind} #${h.id} — ${what}${where} (score ${h.score.toFixed(3)}${h.semanticScore != null ? `, semantic ${h.semanticScore.toFixed(3)}` : ""})`;
+          });
+          return text(`Top ${top.length} matches for "${args.query}":\n${lines.join("\n")}`);
         });
-        const top = hits.slice(0, args.k ?? 5);
-        if (top.length === 0) {
-          return text("No journal entries match. Log some sightings first — then get outside and back.");
-        }
-        const lines = top.map((h, i) => {
-          const where = h.location ? ` at ${h.location}` : h.trail ? ` on ${h.trail}` : "";
-          const what = h.species ?? "walk";
-          return `${String(i + 1).padStart(2, " ")}. [${h.date}] ${h.kind} #${h.id} — ${what}${where} (score ${h.score.toFixed(3)}${h.semanticScore != null ? `, semantic ${h.semanticScore.toFixed(3)}` : ""})`;
-        });
-        return text(`Top ${top.length} matches for "${args.query}":\n${lines.join("\n")}`);
       } catch (err) {
         return errorText(`search failed: ${(err as Error).message}`);
       }
@@ -152,14 +177,20 @@ export function createServer(db: Db): McpServer {
       inputSchema: z.object({}),
     },
     async () => {
-      const o = overview(db);
-      const lines = [
-        `Sightings: ${o.sightingCount}`,
-        `Walks: ${o.walkCount}`,
-        `By category: ${Object.entries(o.categoryCounts).map(([c, n]) => `${c} (${n})`).join(", ") || "none yet"}`,
-        `Last activity: ${o.lastActivity ?? "never"}`,
-      ];
-      return text(lines.join("\n"));
+      return trace(traceTool("journal_overview", {}), async (t) => {
+        const o = overview(db);
+        t.setAttributes({
+          "wanderlog.sightings": o.sightingCount,
+          "wanderlog.walks": o.walkCount,
+        });
+        const lines = [
+          `Sightings: ${o.sightingCount}`,
+          `Walks: ${o.walkCount}`,
+          `By category: ${Object.entries(o.categoryCounts).map(([c, n]) => `${c} (${n})`).join(", ") || "none yet"}`,
+          `Last activity: ${o.lastActivity ?? "never"}`,
+        ];
+        return text(lines.join("\n"));
+      });
     }
   );
 
@@ -177,30 +208,94 @@ export function createServer(db: Db): McpServer {
     },
     async (args) => {
       try {
-        const hits = await hybridSearch(db, args.question, {});
-        const top = hits.slice(0, 10);
-        if (top.length === 0) {
-          return text("Nothing in the journal relates to that question yet. Time to go outside.");
-        }
-        if (await llmAvailable()) {
-          const answer = await generateAnswer(args.question, top);
+        return await trace(traceTool("answer_question", args), async (t) => {
+          const hits = await hybridSearch(db, args.question, {});
+          const top = hits.slice(0, 10);
+          if (top.length === 0) {
+            t.setAttribute("wanderlog.answer_source", "empty");
+            return text("Nothing in the journal relates to that question yet. Time to go outside.");
+          }
+          if (await llmAvailable()) {
+            const answer = await generateAnswer(args.question, top);
+            t.setAttribute("wanderlog.answer_source", "local-model");
+            const evidence = top
+              .slice(0, 3)
+              .map((h) => `${h.kind} #${h.id} on ${h.date}: ${h.text}`)
+              .join("\n");
+            return text(
+              `Answer (from local ${llmModelName()}):\n\n${answer}\n\n` +
+              `Top evidence:\n${evidence}`
+            );
+          }
+          t.setAttribute("wanderlog.answer_source", "evidence-fallback");
           const evidence = top
-            .slice(0, 3)
-            .map((h) => `${h.kind} #${h.id} on ${h.date}: ${h.text}`)
+            .map((h) => `${h.kind} #${h.id} on ${h.date} (score ${h.score.toFixed(3)}): ${h.species ? `${h.species} at ${h.location ?? "?"}` : `walk on ${h.trail ?? "?"}`} — ${h.text}`)
             .join("\n");
           return text(
-            `Answer (from local ${llmModelName()}):\n\n${answer}\n\n` +
-            `Top evidence:\n${evidence}`
+            `No local model is configured (set WANDERLOG_OLLAMA_MODEL, e.g. gemma3). Best evidence from the journal:\n\n${evidence}`
           );
-        }
-        const evidence = top
-          .map((h) => `${h.kind} #${h.id} on ${h.date} (score ${h.score.toFixed(3)}): ${h.species ? `${h.species} at ${h.location ?? "?"}` : `walk on ${h.trail ?? "?"}`} — ${h.text}`)
-          .join("\n");
-        return text(
-          `No local model is configured (set WANDERLOG_OLLAMA_MODEL, e.g. gemma3). Best evidence from the journal:\n\n${evidence}`
-        );
+        });
       } catch (err) {
         return errorText(`could not answer: ${(err as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "log_voice_note",
+    {
+      title: "Log from a voice note",
+      description:
+        "Turn a voice memo from a walk into journal entries. With ELEVENLABS_API_KEY set, the audio is transcribed " +
+        "by ElevenLabs Scribe (zero-retention unless WANDERLOG_STT_LOGGING=1); a local open-weight model " +
+        "(WANDERLOG_OLLAMA_MODEL, e.g. gemma3) then extracts sightings and the walk on-device. Pass transcript " +
+        "instead of audio_path to skip the network entirely — parsing and storage stay local.",
+      inputSchema: z.object({
+        audio_path: z.string().optional().describe("Path to a voice memo on this machine (m4a, mp3, wav, ogg, webm)"),
+        transcript: z.string().optional().describe("An existing transcript; skips transcription and works fully offline"),
+        date: z.string().optional().describe("YYYY-MM-DD date for the walk and sightings; defaults to today"),
+      }),
+    },
+    async (args) => {
+      try {
+        return await trace(traceTool("log_voice_note", args), async (t) => {
+          const provided = args.transcript?.trim();
+          if (!args.audio_path && !provided) {
+            return errorText("provide audio_path (a voice memo) or transcript (existing text)");
+          }
+          let transcription = null;
+          let transcript = provided ?? "";
+          if (!transcript && args.audio_path) {
+            transcription = await transcribeAudio(args.audio_path);
+            transcript = transcription.text;
+            t.setAttribute("wanderlog.transcription_model", transcription.model);
+          } else {
+            t.setAttribute("wanderlog.transcription_model", "provided");
+          }
+          const result = await logVoiceNote(db, transcript, { date: args.date, transcription });
+          t.setAttributes({
+            "wanderlog.sightings_logged": result.sightings.length,
+            "wanderlog.walk_logged": result.walk ? 1 : 0,
+          });
+          const lines = [
+            transcription
+              ? `Transcript (ElevenLabs ${transcription.model}${transcription.language ? `, ${transcription.language}` : ""}, zero-retention):`
+              : "Transcript (provided; nothing sent to a server):",
+            `  "${result.transcript}"`,
+            "",
+          ];
+          if (result.walk) lines.push(`Logged walk #${result.walk.id}: ${walkText(result.walk)}`);
+          for (const s of result.sightings) {
+            lines.push(`Logged sighting #${s.id}: ${sightingText(s)}`);
+          }
+          if (!result.walk && result.sightings.length === 0) {
+            lines.push("Nothing loggable was found in that note — add a species, place, or walk and try again.");
+          }
+          lines.push(`Parsed on-device with ${llmModelName()}. Journal now has ${overview(db).sightingCount} sightings.`);
+          return text(lines.join("\n"));
+        });
+      } catch (err) {
+        return errorText(`could not log voice note: ${(err as Error).message}`);
       }
     }
   );
@@ -239,7 +334,8 @@ export function createServer(db: Db): McpServer {
   return server;
 }
 
-function main(): void {
+async function main(): Promise<void> {
+  await initTracing();
   const db = openDb();
   serveStdio(
     () => createServer(db),
@@ -249,4 +345,4 @@ function main(): void {
   );
 }
 
-main();
+void main();

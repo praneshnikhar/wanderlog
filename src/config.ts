@@ -12,3 +12,9 @@ export const OLLAMA_HOST = process.env.WANDERLOG_OLLAMA_HOST ?? "http://127.0.0.
 export const OLLAMA_MODEL = process.env.WANDERLOG_OLLAMA_MODEL ?? "";
 
 export const OFFLINE = process.env.WANDERLOG_OFFLINE === "1";
+
+export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? "";
+
+export const ELEVENLABS_STT_MODEL = process.env.WANDERLOG_STT_MODEL ?? "scribe_v2";
+
+export const SENTRY_DSN = process.env.SENTRY_DSN ?? "";

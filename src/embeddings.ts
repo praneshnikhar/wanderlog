@@ -1,5 +1,6 @@
 import { pipeline, env } from "@huggingface/transformers";
 import { EMBED_MODEL, OFFLINE } from "./config.js";
+import { trace } from "./tracing.js";
 
 interface EmbeddingOutput {
   data: unknown;
@@ -49,18 +50,33 @@ export async function extractor(): Promise<Extractor | null> {
 export async function embedTexts(texts: string[]): Promise<Float32Array[] | null> {
   const ex = await extractor();
   if (!ex) return null;
-  const output = await ex(texts, { pooling: "mean", normalize: true });
-  const dims = output.dims;
-  if (dims.length !== 2) {
-    throw new Error(`unexpected embedding shape: ${dims.join("x")}`);
-  }
-  const [n, d] = dims;
-  const data = output.data as Float32Array;
-  const vectors: Float32Array[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    vectors[i] = data.slice(i * d, (i + 1) * d);
-  }
-  return vectors;
+  return trace(
+    {
+      name: `embed ${texts.length} text${texts.length === 1 ? "" : "s"}`,
+      op: "gen_ai.embeddings",
+      attributes: {
+        "gen_ai.operation.name": "embeddings",
+        "gen_ai.provider.name": "transformers.js",
+        "gen_ai.request.model": EMBED_MODEL,
+        "wanderlog.texts": texts.length,
+      },
+    },
+    async (t) => {
+      const output = await ex(texts, { pooling: "mean", normalize: true });
+      const dims = output.dims;
+      if (dims.length !== 2) {
+        throw new Error(`unexpected embedding shape: ${dims.join("x")}`);
+      }
+      const [n, d] = dims;
+      const data = output.data as Float32Array;
+      const vectors: Float32Array[] = new Array(n);
+      for (let i = 0; i < n; i++) {
+        vectors[i] = data.slice(i * d, (i + 1) * d);
+      }
+      t.setAttribute("wanderlog.embedding_dim", d);
+      return vectors;
+    }
+  );
 }
 
 export function cosine(a: Float32Array, b: Float32Array): number {

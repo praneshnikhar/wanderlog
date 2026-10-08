@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const names = tools.map((t) => t.name);
   assert.deepEqual(
     [...names].sort(),
-    ["answer_question", "journal_overview", "log_sighting", "log_walk", "search_journal"].sort()
+    ["answer_question", "journal_overview", "log_sighting", "log_walk", "log_voice_note", "search_journal"].sort()
   );
   ok(`tools/list → ${names.join(", ")}`);
 
@@ -91,6 +91,17 @@ async function main(): Promise<void> {
   const answerText = extractText(answerRes);
   assert.match(answerText, /Smoke Lake jetty/, "evidence cites the location");
   ok("answer_question (evidence fallback, no local LLM)");
+
+  const voiceEmptyRes = await client.callTool({ name: "log_voice_note", arguments: {} });
+  assert.match(extractText(voiceEmptyRes), /provide audio_path/, "voice logging requires input");
+  ok("log_voice_note rejects empty input");
+
+  const voiceRes = await client.callTool({
+    name: "log_voice_note",
+    arguments: { transcript: "saw a koel in the neem tree" },
+  });
+  assert.match(extractText(voiceRes), /no local model/, "voice logging names the missing local model");
+  ok("log_voice_note points at the local model when none is running");
 
   const resourcesRes = await client.listResources();
   ok(`resources/list → ${resourcesRes.resources.map((r) => r.uri).join(", ")}`);

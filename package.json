@@ -13,13 +13,16 @@
     "dev": "tsx src/server.ts",
     "seed": "tsx src/seed.ts",
     "demo": "tsx scripts/demo.ts",
+    "bench": "tsx scripts/bench.ts",
     "log": "tsx scripts/log.ts log",
     "log-walk": "tsx scripts/log.ts log-walk",
-    "test": "tsx test/smoke.test.ts"
+    "log-voice": "tsx scripts/log-voice.ts",
+    "test": "tsx test/voice.test.ts && tsx test/smoke.test.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
     "@modelcontextprotocol/server": "^2.3.1",
+    "@sentry/node": "^11.5.0",
     "better-sqlite3": "^13.0.3",
     "zod": "^4.6.5"
   },

@@ -1,4 +1,5 @@
 import { OLLAMA_HOST, OLLAMA_MODEL, OFFLINE } from "./config.js";
+import { trace } from "./tracing.js";
 import type { SearchHit } from "./types.js";
 
 let availability: boolean | null = null;
@@ -52,20 +53,44 @@ export async function generateAnswer(question: string, hits: SearchHit[]): Promi
     "Answer:",
   ].join("\n");
 
-  const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-      options: { temperature: 0.2, num_ctx: 4096 },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!res.ok) {
-    throw new Error(`ollama generate failed: HTTP ${res.status}`);
-  }
-  const body = (await res.json()) as { response?: string };
-  return (body.response ?? "").trim();
+  return trace(
+    {
+      name: `answer with ${OLLAMA_MODEL}`,
+      op: "gen_ai.chat",
+      attributes: {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": OLLAMA_MODEL,
+        "wanderlog.evidence_entries": hits.length,
+      },
+    },
+    async (t) => {
+      const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: OLLAMA_MODEL,
+          prompt,
+          stream: false,
+          options: { temperature: 0.2, num_ctx: 4096 },
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) {
+        throw new Error(`ollama generate failed: HTTP ${res.status}`);
+      }
+      const body = (await res.json()) as {
+        response?: string;
+        prompt_eval_count?: number;
+        eval_count?: number;
+      };
+      if (typeof body.prompt_eval_count === "number") {
+        t.setAttribute("gen_ai.usage.input_tokens", body.prompt_eval_count);
+      }
+      if (typeof body.eval_count === "number") {
+        t.setAttribute("gen_ai.usage.output_tokens", body.eval_count);
+      }
+      return (body.response ?? "").trim();
+    }
+  );
 }

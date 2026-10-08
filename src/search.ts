@@ -8,6 +8,7 @@ import {
   getWalk,
 } from "./db.js";
 import { embedTexts, cosine, tokenize, keywordOverlap } from "./embeddings.js";
+import { trace } from "./tracing.js";
 import type { SearchHit, Sighting, Walk } from "./types.js";
 
 export interface SearchOptions {
@@ -86,41 +87,62 @@ function loadDocs(db: Db, opts: SearchOptions = {}): Doc[] {
 }
 
 export async function hybridSearch(db: Db, query: string, opts: SearchOptions = {}): Promise<SearchHit[]> {
-  const docs = loadDocs(db, opts);
-  if (docs.length === 0) return [];
+  return trace(
+    {
+      name: "search journal",
+      op: "function",
+      attributes: {
+        "wanderlog.query": query.slice(0, 120),
+        "wanderlog.filter.category": opts.category ?? "",
+        "wanderlog.filter.since": opts.since ?? "",
+        "wanderlog.filter.before": opts.before ?? "",
+      },
+    },
+    async (t) => {
+      const docs = loadDocs(db, opts);
+      if (docs.length === 0) {
+        t.setAttribute("wanderlog.hits", 0);
+        return [];
+      }
 
-  const queryTokens = tokenize(query);
-  const vectors = await docVectors(db, docs);
-  const queryVec = (await embedTexts([query]))?.[0] ?? null;
+      const queryTokens = tokenize(query);
+      const vectors = await docVectors(db, docs);
+      const queryVec = (await embedTexts([query]))?.[0] ?? null;
 
-  const scored = docs.map((doc, i) => {
-    const vec = vectors[i];
-    const semantic = queryVec && vec ? Math.max(0, cosine(queryVec, vec)) : null;
-    const keyword = keywordOverlap(queryTokens, tokenize(doc.text));
-    const ageDays = (Date.now() - new Date(`${doc.date}T00:00:00`).getTime()) / 86_400_000;
-    const recency = 1 + 0.12 * Math.exp(-Math.max(0, ageDays) / 21);
-    const score = (semantic != null ? 0.75 * semantic + 0.25 * keyword : keyword) * recency;
-    const source = doc.source;
-    return {
-      kind: doc.kind,
-      id: doc.id,
-      date: doc.date,
-      score,
-      semanticScore: semantic,
-      keywordScore: keyword,
-      species: doc.kind === "sighting" ? (source as Sighting).species : undefined,
-      location: doc.kind === "sighting" ? (source as Sighting).location : undefined,
-      trail: doc.kind === "walk" ? (source as Walk).trail : undefined,
-      text: doc.text,
-    };
-  });
+      const scored = docs.map((doc, i) => {
+        const vec = vectors[i];
+        const semantic = queryVec && vec ? Math.max(0, cosine(queryVec, vec)) : null;
+        const keyword = keywordOverlap(queryTokens, tokenize(doc.text));
+        const ageDays = (Date.now() - new Date(`${doc.date}T00:00:00`).getTime()) / 86_400_000;
+        const recency = 1 + 0.12 * Math.exp(-Math.max(0, ageDays) / 21);
+        const score = (semantic != null ? 0.75 * semantic + 0.25 * keyword : keyword) * recency;
+        const source = doc.source;
+        return {
+          kind: doc.kind,
+          id: doc.id,
+          date: doc.date,
+          score,
+          semanticScore: semantic,
+          keywordScore: keyword,
+          species: doc.kind === "sighting" ? (source as Sighting).species : undefined,
+          location: doc.kind === "sighting" ? (source as Sighting).location : undefined,
+          trail: doc.kind === "walk" ? (source as Walk).trail : undefined,
+          text: doc.text,
+        };
+      });
 
-  return scored.sort((a, b) => {
-    const bucketA = Math.floor(a.score * 20);
-    const bucketB = Math.floor(b.score * 20);
-    if (bucketA !== bucketB) return b.score - a.score;
-    return b.date.localeCompare(a.date);
-  });
+      t.setAttributes({
+        "wanderlog.hits": scored.length,
+        "wanderlog.semantic_rerank": queryVec != null,
+      });
+      return scored.sort((a, b) => {
+        const bucketA = Math.floor(a.score * 20);
+        const bucketB = Math.floor(b.score * 20);
+        if (bucketA !== bucketB) return b.score - a.score;
+        return b.date.localeCompare(a.date);
+      });
+    }
+  );
 }
 
 export async function ensureEmbeddedFor(db: Db, kind: "sighting" | "walk", id: number): Promise<void> {
